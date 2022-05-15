@@ -4,13 +4,15 @@ import (
 	"aliyun/serverless/webide-server/pkg/context"
 	"aliyun/serverless/webide-server/pkg/tar"
 	"bytes"
-	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/golang/glog"
+	"github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
 )
 
@@ -34,11 +36,11 @@ type (
 // configFilePath is the config file where store the configuration for vscode server running.
 func NewServer(ctx *context.Context) (*Server, error) {
 	// Read the configurations from the specified file.
-	err := viper.ReadInConfig()
-	if err != nil {
-		glog.Errorf("Failed to read vscode server config file. Error: %v", err)
-		return nil, err
-	}
+	// err := viper.ReadInConfig()
+	// if err != nil {
+	// 	glog.Errorf("Failed to read vscode server config file. Error: %v", err)
+	// 	return nil, err
+	// }
 
 	// Set the default values for each configuration item.
 	viper.SetDefault("vscode.host", "127.0.0.1")
@@ -53,10 +55,10 @@ func NewServer(ctx *context.Context) (*Server, error) {
 	s := &Server{}
 	s.Host = viper.GetString("vscode.host")
 	s.Port = viper.GetString("vscode.port")
-	s.VscodeDataDir = viper.GetString("vscode.dataDirectory")
-	s.VscodeBinaryDir = viper.GetString("vscode.binaryDirectory")
+	s.VscodeDataDir, _ = homedir.Expand(viper.GetString("vscode.dataDirectory"))
+	s.VscodeBinaryDir, _ = homedir.Expand(viper.GetString("vscode.binaryDirectory"))
 	s.VscodeDataOssPath = viper.GetString("vscode.dataOssPath")
-	s.WorkspaceDir = viper.GetString("workspace.directory")
+	s.WorkspaceDir, _ = homedir.Expand(viper.GetString("workspace.directory"))
 	s.WorkspaceOssPath = viper.GetString("workspace.ossPath")
 	s.OssBucketName = viper.GetString("ossBucketName")
 
@@ -96,21 +98,38 @@ func (s *Server) init() error {
 	}
 	glog.Infof("Load vscode server data from oss succeeded.")
 
+	// Make sure vscode server is ready for recive the requests.
+
 	// Launch the vscode server.
 	// Make sure the openvscode-server binary in the system path.
 	userDataDir := filepath.Join(s.VscodeDataDir, "user-data")
 	serverDataDir := filepath.Join(s.VscodeDataDir, "server-data")
 	extensionsDir := filepath.Join(s.VscodeDataDir, "extensions")
-	cmdStr := fmt.Sprintf(
-		"%s --host=%s --port=%s --user-data-dir=%s --server-data-dir=%s --extensions-dir=%s --without-connection-token --start-server --telemetry-level=off",
-		filepath.Join(s.VscodeBinaryDir, "openvscode-server"), s.Host, s.Port, userDataDir, serverDataDir, extensionsDir)
-	cmd := exec.Command("bash", "-c", cmdStr)
+	// cmdStr := fmt.Sprintf(
+	// 	"%s --host=%s --port=%s --user-data-dir=%s --server-data-dir=%s --extensions-dir=%s --without-connection-token --start-server --telemetry-level=off",
+	// 	filepath.Join(s.VscodeBinaryDir, "openvscode-server"), s.Host, s.Port, userDataDir, serverDataDir, extensionsDir)
+	// cmd := exec.Command("bash", "-c", cmdStr)
+	cmd := exec.Command(
+		filepath.Join(s.VscodeBinaryDir, "openvscode-server"),
+		"--host="+s.Host, "--port="+s.Port,
+		"--user-data-dir="+userDataDir, "--server-data-dir="+serverDataDir, "--extensions-dir="+extensionsDir,
+		"--without-connection-token", "--start-server", "--telemetry-level=off")
 	err := cmd.Start()
 	if err != nil {
-		glog.Errorf("Launch vscode server failed. cmd: %s error: %v", cmdStr, err)
+		glog.Errorf("Launch vscode server failed. cmd: %s error: %v", cmd.String(), err)
 		return err
 	}
-	glog.Infof("Launch vscode server succeeded. Cmd: %s", cmdStr)
+	glog.Infof("Launch vscode server succeeded. Cmd: %s", cmd.String())
+
+	for {
+		if _, err := net.Dial("tcp", s.Host+":"+s.Port); err == nil {
+			glog.Infof("Vscode server ready for recive requests.")
+			break
+		} else {
+			glog.Infof("Waiting for vscode server ready: %v", err)
+			time.Sleep(30 * time.Millisecond)
+		}
+	}
 
 	// Wait for the workspace loading goroutine done.
 	// Ideally, vscode server launching should not be blocked by workspace loading.

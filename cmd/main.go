@@ -3,10 +3,13 @@ package main
 import (
 	"aliyun/serverless/webide-server/pkg/context"
 	"aliyun/serverless/webide-server/pkg/vscode"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/golang/glog"
@@ -21,6 +24,8 @@ type ServerManager struct {
 // init implements the FC initializer instance lifecycle callback, called by FC runtime before processing the request.
 func (sm *ServerManager) init() func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		glog.Infof("Starting server manager init ...")
+
 		// Get contextSource option from config file.
 		// contextSource indicates where to get the context.
 		// In FC runtime, context should be parsed from the request headers.
@@ -54,7 +59,7 @@ func (sm *ServerManager) init() func(http.ResponseWriter, *http.Request) {
 		}
 
 		// Create the reverse proxy.
-		url, err := url.Parse("http://" + sm.VscodeServer.Host + ":9527")
+		url, err := url.Parse("http://" + sm.VscodeServer.Host + ":" + sm.VscodeServer.Port)
 		if err != nil {
 			glog.Errorf("Parse url %s failed. Error: %v", sm.VscodeServer.Host, err)
 			w.WriteHeader(http.StatusInternalServerError)
@@ -72,6 +77,8 @@ func (sm *ServerManager) init() func(http.ResponseWriter, *http.Request) {
 
 func (sm *ServerManager) shutdown() func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		glog.Infof("Starting server manager shutdown ...")
+
 		sm.VscodeServer.Shutdown()
 
 		w.WriteHeader(http.StatusOK)
@@ -91,19 +98,27 @@ func (sm *ServerManager) process() func(http.ResponseWriter, *http.Request) {
 }
 
 func main() {
-	//flag.Parse()
+	flag.Parse()
+	defer glog.Flush()
+
+	// Get the directory of current running process.
+	ex, err := os.Executable()
+	if err != nil {
+		glog.Fatalf("Failed to get the directory of current running process. Error: %v", err)
+	}
+	configDir := filepath.Dir(ex)
 
 	// Setup the config file.
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
-	viper.AddConfigPath(".")
+	viper.AddConfigPath(configDir)
 
 	// Read the configurations from the specified file.
-	err := viper.ReadInConfig()
+	err = viper.ReadInConfig()
 	if err != nil {
-		glog.Errorf("Failed to read ide server config file. Error: %v", err)
-		return
+		glog.Fatalf("Failed to read ide server config file. Error: %v", err)
 	}
+	glog.Infof("Reverse proxy read config file from directory: %s", configDir)
 
 	sm := &ServerManager{}
 
@@ -121,5 +136,7 @@ func main() {
 		Addr:        ":8080",
 		IdleTimeout: 5 * time.Minute,
 	}
+
+	glog.Infof("Reverse proxy listen at %s ...", proxyServer.Addr)
 	glog.Fatal(proxyServer.ListenAndServe())
 }

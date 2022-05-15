@@ -5,22 +5,50 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
+	"github.com/spf13/viper"
 )
 
-const gOssBucketName string = "hryang-serverless"
+// To run the tests, please config the following items in configs/test.yaml
+// 1. ossBucketName
+// 2. vscode.dataDirectory
+// 3. vscode.binaryDirectory
+// 4. vscode.dataOssPath
+// 5. workspace.directory
+// 6. workspace.ossPath
+
+// Setup the test cases. Make sure the working dir is the project root directory.
+func chdir() {
+	_, filename, _, _ := runtime.Caller(0)
+	dir := path.Join(path.Dir(filename), "../..")
+	err := os.Chdir(dir)
+	if err != nil {
+		panic(err)
+	}
+}
 
 func TestLoadEmptyWorkspace(t *testing.T) {
+	chdir()
+
 	ctx, err := context.NewFromEnvVars()
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
 
-	vserver := &Server{}
-	vserver.OssBucketName = "hryang-serverless"
+	// The tests must run in the project root directory.
+	viper.SetConfigFile("configs/test.yaml")
+	viper.ReadInConfig()
+
+	vserver, err := NewServer(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vserver.OssBucketName = viper.GetString("ossBucketName")
 	ossEndpoint := "https://oss-" + ctx.Region + ".aliyuncs.com"
 	c, err := oss.New(ossEndpoint, ctx.AccessKeyId, ctx.AccessKeySecret, oss.SecurityToken(ctx.SecurityToken))
 	if err != nil {
@@ -52,9 +80,13 @@ func TestWorkspace(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 
+	// The tests must run in the project root directory.
+	viper.SetConfigFile("configs/test.yaml")
+	viper.ReadInConfig()
+
 	vserver := &Server{}
-	vserver.OssBucketName = "hryang-serverless"
-	vserver.WorkspaceOssPath = "tests/vscode-server/test-workspace/workspace.tar.gz"
+	vserver.OssBucketName = viper.GetString("ossBucketName")
+	vserver.WorkspaceOssPath = viper.GetString("workspace.ossPath")
 	ossEndpoint := "https://oss-" + ctx.Region + ".aliyuncs.com"
 	c, err := oss.New(ossEndpoint, ctx.AccessKeyId, ctx.AccessKeySecret, oss.SecurityToken(ctx.SecurityToken))
 	if err != nil {

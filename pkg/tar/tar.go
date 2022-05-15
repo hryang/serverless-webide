@@ -4,6 +4,7 @@ package tar
 
 import (
 	"archive/tar"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -13,6 +14,8 @@ import (
 
 	//gzip "github.com/klauspost/pgzip"
 	"compress/gzip"
+
+	"github.com/golang/glog"
 )
 
 // Check for path traversal and correct forward slashes
@@ -24,12 +27,26 @@ func validRelPath(p string) bool {
 }
 
 // Extract the tar.gz stream data and write to the local file.
-// src: the source of the tar.gz stream
-// dst: the destination of the local file.
+// src is the source of the tar.gz stream
+// dst is the destination of the local directory. If dst directory does not exist, then create it.
 func ExtractTarGz(src io.Reader, dst string) error {
+	if _, err := os.Stat(dst); err != nil {
+		// Create the directory if necessary.
+		if errors.Is(err, fs.ErrNotExist) {
+			if err = os.MkdirAll(dst, 0755); err != nil {
+				glog.Errorf("Create directory failed: %s Error: %v", dst, err)
+				return err
+			}
+			glog.Infof("Create directory %s succeeded.", dst)
+		}
+	}
 	uncompressedStream, err := gzip.NewReader(src)
-	if err != nil {
-		return fmt.Errorf("ExtractTarGz: new gzip reader failed: %v", err)
+	if err == io.EOF {
+		glog.Infof("The source is empty: %+v", src)
+		return nil
+	} else if err != nil {
+		glog.Errorf("New gzip reader %+v failed: %v", src, err)
+		return err
 	}
 
 	tarReader := tar.NewReader(uncompressedStream)
@@ -42,11 +59,13 @@ func ExtractTarGz(src io.Reader, dst string) error {
 		}
 
 		if err != nil {
-			return fmt.Errorf("ExtractTarGz: new tar reader failed: %v", err)
+			glog.Errorf("New tar reader %+v failed: %v", uncompressedStream, err)
+			return err
 		}
 
 		if !validRelPath(header.Name) {
-			return fmt.Errorf("ExtractTarGz: tar containerd invalid name: %s", header.Name)
+			glog.Errorf("Tar conained invalid name: %s", header.Name)
+			return fmt.Errorf("tar containerd invalid name: %s", header.Name)
 		}
 
 		target := filepath.Join(dst, header.Name)
@@ -56,17 +75,20 @@ func ExtractTarGz(src io.Reader, dst string) error {
 		case tar.TypeDir:
 			if _, err := os.Stat(target); err != nil {
 				if err := os.MkdirAll(target, 0755); err != nil {
-					return fmt.Errorf("ExtractTarGz: Mkdir() failed: %v", err)
+					glog.Errorf("MkdirAll(%s, 0755) failed: %v", target, err)
+					return err
 				}
 			}
 		// If it's a file, create it with same permission.
 		case tar.TypeReg:
 			fileToWrite, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
 			if err != nil {
-				return fmt.Errorf("ExtractTarGz: OpenFile() failed: %v", err)
+				glog.Errorf("Open file %s failed. Error: %v", target, err)
+				return err
 			}
 			if _, err := io.Copy(fileToWrite, tarReader); err != nil {
-				return fmt.Errorf("ExtractTarGz: write file failed: %v", err)
+				glog.Errorf("Write file %+v failed. Error: %v", fileToWrite, err)
+				return err
 			}
 
 			// Manually close here after each file operation. defering would cause each file
@@ -79,73 +101,86 @@ func ExtractTarGz(src io.Reader, dst string) error {
 }
 
 // Compress a file or directory as tar.gz and write to the destination io stream.
-// src: the source of the file or directory.
-// dst: the destination of the io stream.
+// src is the source of the file or directory.
+// dst is the destination of the io stream.
 func TarGz(src string, dst io.Writer) error {
 	gzipWriter := gzip.NewWriter(dst)
 	tarWriter := tar.NewWriter(gzipWriter)
 
 	fi, err := os.Stat(src)
 	if err != nil {
-		return fmt.Errorf("TarGz: stat %s failed: %v", src, err)
+		glog.Errorf("Stat %s failed. Error: %v", src, err)
+		return err
 	}
 	mode := fi.Mode()
 	if mode.IsRegular() { // handle regular file
 		header, err := tar.FileInfoHeader(fi, src)
 		if err != nil {
-			return fmt.Errorf("TarGz: get %s file info failed: %v", src, err)
+			glog.Errorf("Get %s file info failed: %v", src, err)
+			return err
 		}
 		if err := tarWriter.WriteHeader(header); err != nil {
-			return fmt.Errorf("TarGz: write file header failed: %v", err)
+			glog.Errorf("Write file header failed: %v", err)
+			return err
 		}
 		data, err := os.Open(src)
 		if err != nil {
-			return fmt.Errorf("TarGz: open file %s failed: %v", src, err)
+			glog.Errorf("Open file %s failed: %v", src, err)
+			return err
 		}
 		if _, err := io.Copy(tarWriter, data); err != nil {
-			return fmt.Errorf("TarGz: write tar failed: %v", err)
+			glog.Errorf("Write tar failed: %v", err)
+			return err
 		}
 	} else if mode.IsDir() { // handle directory
 		filepath.Walk(src, func(path string, info fs.FileInfo, err error) error {
 			// Generate the tar header.
 			header, err := tar.FileInfoHeader(info, path)
 			if err != nil {
-				return fmt.Errorf("TarGz: get %s file info header failed: %v", path, err)
+				glog.Errorf("Get %s file info header failed: %v", path, err)
+				return err
 			}
 
 			header.Name, err = filepath.Rel(src, path)
 			if err != nil {
-				return fmt.Errorf("TarGz: get relative path failed. base path: %s target path: %s error: %v", src, path, err)
+				glog.Errorf("Get relative path failed. Base path: %s Target path: %s Error: %v", src, path, err)
+				return err
 			}
 
 			// Write tar header.
 			if err := tarWriter.WriteHeader(header); err != nil {
-				return fmt.Errorf("TarGz: write tar header failed: %v", err)
+				glog.Errorf("Write tar header failed: %v", err)
+				return err
 			}
 
 			// Write regular file.
 			if !info.IsDir() {
 				data, err := os.Open(path)
 				if err != nil {
-					return fmt.Errorf("TarGz: open %s file failed: %v", path, err)
+					glog.Errorf("Open %s file failed: %v", path, err)
+					return err
 				}
 				if _, err := io.Copy(tarWriter, data); err != nil {
-					return fmt.Errorf("TarGz: write tar stream failed: %v", err)
+					glog.Errorf("Write tar stream failed: %v", err)
+					return err
 				}
 			}
 
 			return nil
 		})
 	} else {
-		return fmt.Errorf("TarGz: file type not supported: %s", mode.String())
+		glog.Errorf("File type not supported: %s", mode.String())
+		return fmt.Errorf("unsupported file type: %s", mode.String())
 	}
 
 	if err := tarWriter.Close(); err != nil {
-		return fmt.Errorf("TarGz: close tar writer failed: %v", err)
+		glog.Errorf("Close tar writer failed: %v", err)
+		return err
 	}
 
 	if err := gzipWriter.Close(); err != nil {
-		return fmt.Errorf("TarGz: close gzip writer failed: %v", err)
+		glog.Errorf("Close gzip writer failed: %v", err)
+		return err
 	}
 
 	return nil
