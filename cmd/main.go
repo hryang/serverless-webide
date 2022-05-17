@@ -133,10 +133,10 @@ func main() {
 
 	// Start the proxy server.
 	proxyServer := &http.Server{
-		Addr:        ":8080",
+		Addr:        ":9000",
 		IdleTimeout: 5 * time.Minute,
 	}
 
 	glog.Infof("Reverse proxy listen at %s ...", proxyServer.Addr)
-	glog.Fatal(proxyServer.ListenAndServe())
+	glog.Fatalf("Reverse proxy run failed. Error: %v", proxyServer.ListenAndServe())
 }

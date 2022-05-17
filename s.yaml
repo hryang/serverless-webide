@@ -70,7 +70,7 @@ services:
             - ./webide-server
           args:
             - -logtostderr=true
-        caPort: 8080
+        caPort: 9000
         instanceConcurrency: 100
         initializer: /initialize
         initializationTimeout: 120
