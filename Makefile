@@ -38,13 +38,11 @@ endif
 third_party:
 	@if [ -d third_party/${VSCODE_SERVER} ]; then echo "vscode server is ready"; else mkdir -p third_party/${VSCODE_SERVER} && curl https://s-public-packages.oss-cn-hangzhou.aliyuncs.com/openvscode-server/${VSCODE_SERVER}.tar.gz -o third_party/${VSCODE_SERVER}.tar.gz && tar zxvf third_party/${VSCODE_SERVER}.tar.gz -C third_party; fi
 
-build:
-	make third_party
+build: third_party
 	GOOS=${OS} GOARCH=${ARCH} CGO_ENABLED=0 go build -o target/${BINARY} ./cmd
 	cp configs/dev.yaml target/config.yaml
 
-test:
-	make third_party
+test: third_party
 	GOOS=${OS} GOARCH=${ARCH} CGO_ENABLED=0 go test -v ./...
 
 # Run: make release to build artifacts for FC runtime.

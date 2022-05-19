@@ -1,7 +1,5 @@
 # serverless-webide
 
-
-
 基于 Serverless 架构和 Vscode 的**即开即用，用完即走**的轻量 Web IDE 服务。主要特点：
 
 * 全功能 Vscode Web IDE，支持海量的插件。
@@ -12,7 +10,7 @@
 
 ## 快速体验
 
-1. 开通阿里云函数计算，对象存储服务。
+1. 开通阿里云[函数计算](https://fcnext.console.aliyun.com/)，[对象存储](https://oss.console.aliyun.com)服务。
 
 2. 在函数计算控制台应用中心部署 Serverless WebIDE 服务。
 
@@ -40,30 +38,39 @@
 
 ## 开发调试
 
+本地需要提前安装好 Golang, 下面的开发调试流程仅针对 mac 和 linux
+
+> 如果您使用 windows 进行开发，且本地安装了 docker， 可以使用如下命令进入 linux 容器，完成下面的开发调试
+> `docker run -it -v {your repo dir}:/code -p 9000:9000 golang bash`
+> 其中 {your repo dir} 对应你 git clone 这个仓库的目录，进入容器后， 跳转到 /code 目录 
+
 在项目根目录下按如下步骤执行 shell 命令。
 
 1. 修改 `dev.yaml` 中的配置项，执行下述命令编译项目。成功后，会在项目根目录下新建 target 目录，包含了二进制文件，对应的启动配置文件等交付物。
+   > **注意** `binaryDirectory` 这个值,  跟您的开发平台有有关， 您可以先 `make build` 之后， 参考 `third_party ` 下面的 `openvscode-server-v${VSCODE_SERVER_VERSION}-${OS}-${ARCH}` 目录， 然后修改 dev.yaml， 重新 `make build`
 
    ```shell
    make build
    ```
 
-2. 进入 target 目录，在本地环境启动 webide server。
+2. 在本地环境启动 webide server。
 
    ```shell
-   ./ide-server
+   ./target/webide-server -logtostderr=true
    ```
+
+   > 如果您是 mac amd64 机型，./target/webide-server -logtostderr=true 有 readlink: illegal option -- f, 请尝试安装 `brew install coreutils` 解决，[详情](https://www.cnblogs.com/cphmvp/p/7070941.html) 
 
 3. 请注意，step 2 只是创建了反向代理 ide-server，后台的 vscode-server 并没有启动。只有执行下述命令后，web ide 才功能就绪。其中端口请后 ide-server 启动时的端口保持一致。
 
    ```shell
-   curl localhost:8080/initialize
+   curl localhost:9000/initialize
    ```
 
 4. Shutdown webide-server，将 vscode-server 的配置数据和 workspace 下的用户数据保存到 oss。
 
    ```shell
-   curl localhost:8080/shutdown
+   curl localhost:9000/shutdown
    ```
 
 ## 本地测试
@@ -79,8 +86,6 @@
 ```shell
 make test
 ```
-
-
 
 ## 安装 Serverless Devs 工具
 
@@ -103,14 +108,15 @@ make layer
 ![img](https://cdn.nlark.com/yuque/0/2022/png/995498/1652580602698-2abb72d6-bef9-4b7b-a683-4bee1b3c5085.png?x-oss-process=image%2Fresize%2Cw_1500%2Climit_0)
 
 ## 部署应用到函数计算（FC）
-
-1. 交叉编译，生成可部署到 FC 的交付物。
+1. 修改 `fc.yaml` 中的配置项, 主要是 `ossBucketName` 这个值
+ 
+2. 交叉编译，生成可部署到 FC 的交付物。
 
    ```shell
    make release
    ```
 
-2. 使用 Serverless Devs 工具部署到 FC。
+3. 使用 Serverless Devs 工具部署到 FC。
 
    ```shell
    s deploy
@@ -135,8 +141,6 @@ s logs --tail
    ```shell
    s instance list
    ```
-
-   
 
 2. 然后登录实例。请将 `your-instance-id` 换成您在 step 1 中列出的实例 id。
 
