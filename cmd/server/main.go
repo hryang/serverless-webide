@@ -107,11 +107,10 @@ func main() {
 		glog.Fatalf("Failed to get the directory of current running process. Error: %v", err)
 	}
 	configDir := filepath.Dir(ex)
+	configFile := filepath.Join(configDir, "config.yaml")
 
 	// Setup the config file.
-	viper.SetConfigName("config")
-	viper.SetConfigType("yaml")
-	viper.AddConfigPath(configDir)
+	viper.SetConfigFile(configFile)
 
 	// Read the configurations from the specified file.
 	err = viper.ReadInConfig()
