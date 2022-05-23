@@ -19,13 +19,13 @@ name: Web IDE
 # access 是当前应用所需要的密钥信息配置：
 # 密钥配置可以参考：https://www.serverless-devs.com/serverless-devs/command/config
 # 密钥使用顺序可以参考：https://www.serverless-devs.com/serverless-devs/tool#密钥使用顺序与规范
-access: default
+access: "{{ access }}"
 
 vars: # 全局变量
-  region: cn-hangzhou
-  name: webide-server
+  region:  "{{ region }}"
+  name: "{{ serviceName }}"
   fcServiceName: ${vars.name}
-  fcFunctionName: ${vars.name}-v2
+  fcFunctionName: webide
 
 services:
   vscode-server: # 业务名称/模块名称，通常对应 FC 的一个函数。
@@ -33,38 +33,42 @@ services:
     # 只对 webide-server 进行构建：s webide-server build
     # 如果直接执行 s build，工具则会对当前Yaml下，所有和 webide-server 平级的业务模块（如有其他平级的模块，例如下面注释的next-function），按照一定顺序进行 build 操作
     component: fc # 组件名称，Serverless Devs 工具本身类似于一种游戏机，不具备具体的业务能力，组件类似于游戏卡，用户通过向游戏机中插入不同的游戏卡实现不同的功能，即通过使用不同的组件实现不同的具体业务能力
-    # actions: # 自定义执行逻辑，关于actions 的使用，可以参考：https://www.serverless-devs.com/serverless-devs/yaml#行为描述 pre-deploy: # 在deploy之前运行
-    #- run: curl -o code.tar.gz https://ghproxy.com/https://github.com/gitpod-io/openvscode-server/releases/download/openvscode-server-v1.66.1/openvscode-server-v1.66.1-linux-x64.tar.gz && rm -rf code && mkdir code && tar zxvf code.tar.gz --strip-components 1 -C code && rm -rf code.tar.gz
-    # - run: make release TARGET=fc
-    #   path: ./
-    #        - component: fc build --use-docker # 要运行的组件，格式为【component: 组件名 命令 参数】（可以通过s cli registry search --type Component 获取组件列表）
-    #        - run: docker build xxx          # 要执行的系统命令，类似于一种钩子的形式
-    #          path: ./src                    # 执行系统命令/钩子的路径
-    #        - plugin: myplugin               # 与运行的插件 （可以通过s cli registry search --type Plugin 获取组件列表）
-    #          args:                          # 插件的参数信息
-    #            testKey: testValue
-    #      post-deploy: # 在deploy之后运行
-    #        - component: fc versions publish # 要运行的命令行
+    actions:
+      pre-deploy:
+        - run: make release
+          path: ./
+        - run: make download-layer
+          path: ./
+        - plugin: layer-fc
+          args:
+            name: openvscode-server
+            codeUri: /tmp/fc-layer
+            #forceUpdate: true
+            runtime:
+              - custom
     props:
       region: ${vars.region} # 关于变量的使用方法，可以参考：https://www.serverless-devs.com/serverless-devs/yaml#变量赋值
       service:
         name: ${vars.fcServiceName}
         description: "The web ide service."
-        logConfig: auto
-        role: "acs:ram::1050834996213541:role/AliyunFcDefaultRole" # 授予函数计算所需权限的RAM role, 使用场景包含 1. 把 function产生的 log 发送到用户的 logstore 中 2. 为function 在执行中访问其它云资源生成 token
+        # logConfig: auto  # 如果您需要查看线上函数执行的日志，取消这个注释
+        # 授予函数计算所需权限的RAM role, 使用场景包含:
+        # 1. 把 function产生的 log 发送到用户的 logstore 中 
+        # 2. 为function 在执行中访问其它云资源生成 token，在本示例中是 fc.yaml 的 OSS bucket 读写权限
+        # 示例: "acs:ram::123456789:role/fcvscoderole" 
+        role: "{{ roleArn }}"
       function:
         name: ${vars.fcFunctionName}
         description: "The openvscode server function."
         timeout: 900
         memorySize: 3072
         runtime: custom
-        layers:
-          # 将依赖的三方 openvscode server 打包发布为 FC layer，这样后续只需部署我们自己的代码，不用重复部署 openvscode server.
-          - bbcf9e99f23f80d1a56ad2c76334c2af#openvscode-server#8
-        codeUri: target
+        codeUri: ./target
         environmentVariables:
           PATH: >-
             /opt/openvscode-server/bin:/opt/openvscode-server:/usr/local/bin/apache-maven/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/ruby/bin
+          OSS_BUCKET_NAME: "{{ ossBucket }}" 
+          TZ: "{{ timeZone }}" 
         customRuntimeConfig:
           command:
             - ./webide-server
@@ -78,12 +82,6 @@ services:
           preStop:
             handler: /pre-stop
             timeout: 600
-      #        environmentVariables:
-      #          PATH: /code/node-v12.13.0-linux-x64/bin:$PATH
-      #        customRuntimeConfig:
-      #          command:
-      #            - node
-      #            - server.js
       triggers:
         - name: http_t
           type: http
@@ -94,6 +92,8 @@ services:
               - POST
               - PUT
               - DELETE
+              - HEAD
+              - OPTIONS
       # 设置 custom domains，
       customDomains:
         - domainName: auto # 设置为 auto 时，serverless devs 会自动生成测试域名
@@ -107,17 +107,5 @@ services:
                 - POST
                 - PUT
                 - DELETE
-#  next-function: # 第二个函数的案例，仅供参考
-#    # 如果在当前项目下执行 s deploy，会同时部署模块：
-#    #   WebIDE：服务hello-world-service，函数cpp-event-function
-#    #   next-function：服务hello-world-service，函数next-function-example
-#    # 如果想单独部署当前服务与函数，可以执行 s + 模块名/业务名 + deploy，例如：s next-function deploy
-#    # 如果想单独部署当前函数，可以执行 s + 模块名/业务名 + deploy function，例如：s next-function deploy function
-#    # 更多命令可参考：https://www.serverless-devs.com/fc/readme#文档相关
-#    component: fc
-#    props:
-#      region: ${vars.region}
-#      service: ${vars.service} # 应用整体的服务配置
-#      function: # 定义一个新的函数
-#        name: next-function-example
-#        description: 'hello world by serverless devs'
+                - HEAD
+                - OPTIONS

@@ -52,11 +52,11 @@ release:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o target/${BINARY} ./cmd/...
 	cp configs/fc.yaml target/config.yaml
 
-layer:
-	@if [ -e third_party/openvscode-server-v${VSCODE_SERVER_VERSION}-linux-amd64.tar.gz ]; then echo "vscode server is ready"; else mkdir -p third_party && curl https://s-public-packages.oss-cn-hangzhou.aliyuncs.com/openvscode-server/openvscode-server-v${VSCODE_SERVER_VERSION}-linux-amd64.tar.gz -o third_party/openvscode-server-v${VSCODE_SERVER_VERSION}-linux-amd64.tar.gz; fi
-	rm -rf /tmp/fc-layer/
-	mkdir -p /tmp/fc-layer/openvscode-server
-	tar zxvf third_party/openvscode-server-v${VSCODE_SERVER_VERSION}-linux-amd64.tar.gz -C /tmp/fc-layer/openvscode-server --strip-components 1
+download-layer:
+	@if [ -e /tmp/openvscode-server-v${VSCODE_SERVER_VERSION}-linux-amd64.tar.gz ]; then echo "vscode server is ready"; else mkdir -p /tmp && curl https://s-public-packages.oss-cn-hangzhou.aliyuncs.com/openvscode-server/openvscode-server-v${VSCODE_SERVER_VERSION}-linux-amd64.tar.gz -o /tmp/openvscode-server-v${VSCODE_SERVER_VERSION}-linux-amd64.tar.gz; fi
+	@if [ -e /tmp/fc-layer/openvscode-server ]; then echo "openvscode-server dir is ready"; else mkdir -p /tmp/fc-layer/openvscode-server && tar zxf /tmp/openvscode-server-v${VSCODE_SERVER_VERSION}-linux-amd64.tar.gz -C /tmp/fc-layer/openvscode-server --strip-components 1; fi
+
+layer: download-layer
 	s layer publish --layer-name openvscode-server --code /tmp/fc-layer
 	
 clean:

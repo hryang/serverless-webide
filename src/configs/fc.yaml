@@ -1,5 +1,5 @@
 contextSource: fc
-ossBucketName: hryang-serverless
+ossBucketName: ls-vscode
 vscode:
   host: 127.0.0.1
   port: 3000

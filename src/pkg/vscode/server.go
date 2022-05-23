@@ -62,6 +62,12 @@ func NewServer(ctx *context.Context) (*Server, error) {
 	s.WorkspaceOssPath = viper.GetString("workspace.ossPath")
 	s.OssBucketName = viper.GetString("ossBucketName")
 
+	// high priority env
+	OssBucketName := os.Getenv("OSS_BUCKET_NAME")
+	if OssBucketName != "" {
+		s.OssBucketName = OssBucketName
+	}
+
 	glog.Infof("Read vscode server config succeeded. Server config: %+v", *s)
 
 	ossEndpoint := "https://oss-" + ctx.Region + ".aliyuncs.com"
